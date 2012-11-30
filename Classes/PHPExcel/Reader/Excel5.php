@@ -960,7 +960,11 @@ class PHPExcel_Reader_Excel5 extends PHPExcel_Reader_Abstract implements PHPExce
 					$extractedRanges = array();
 					foreach ($ranges as $range) {
 						$sheetName = $range['sheetName'];
-						$extractedRanges[] = str_replace('$', '', $range['range']); // C7:J66
+						$extractRange = str_replace('$', '', $range['range']);
+						if (strpos($extractRange, ':') === FALSE) { // range form from single cell
+							$extractRange = $extractRange.':'.$extractRange;
+						}
+						$extractedRanges[] = $extractRange; // C7:J66
 					}
 					if ($docSheet = $this->_phpExcel->getSheetByName($sheetName)) {
 						$docSheet->getPageSetup()->setPrintArea(implode(',', $extractedRanges)); // C7:J66,A1:IV2
