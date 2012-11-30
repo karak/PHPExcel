@@ -1501,17 +1501,15 @@ class PHPExcel_Reader_Excel2007 extends PHPExcel_Reader_Abstract implements PHPE
 							// Loop through definedNames
 							if ($xmlWorkbook->definedNames) {
 								foreach ($xmlWorkbook->definedNames->definedName as $definedName) {
-									// Extract range
-									$extractedRange = (string)$definedName;
-									$extractedRange = preg_replace('/\'(\w+)\'\!/', '', $extractedRange);
-									if (($spos = strpos($extractedRange,'!')) !== false) {
-										$extractedRange = substr($extractedRange,0,$spos).str_replace('$', '', substr($extractedRange,$spos));
-									} else {
-										$extractedRange = str_replace('$', '', $extractedRange);
-									}
-
 									// Valid range?
-									if (stripos((string)$definedName, '#REF!') !== FALSE || $extractedRange == '') {
+									if (stripos((string)$definedName, '#REF!') !== FALSE) {
+										continue;
+									}
+									
+									// Extract range
+									$extractedRange = self::_extractRange((string)$definedName);
+									
+									if (count($extractedRange) === 0) {
 										continue;
 									}
 
@@ -1522,14 +1520,11 @@ class PHPExcel_Reader_Excel2007 extends PHPExcel_Reader_Abstract implements PHPE
 
 											case '_xlnm._FilterDatabase':
 												if ((string)$definedName['hidden'] !== '1') {
-													$docSheet->getAutoFilter()->setRange($extractedRange);
+													$docSheet->getAutoFilter()->setRange(implode(',', $extractedRange));
 												}
 												break;
 
 											case '_xlnm.Print_Titles':
-												// Split $extractedRange
-												$extractedRange = explode(',', $extractedRange);
-
 												// Set print titles
 												foreach ($extractedRange as $range) {
 													$matches = array();
@@ -1546,14 +1541,7 @@ class PHPExcel_Reader_Excel2007 extends PHPExcel_Reader_Abstract implements PHPE
 												break;
 
 											case '_xlnm.Print_Area':
-												$rangeSets = explode(',', $extractedRange);		// FIXME: what if sheetname contains comma?
-												$newRangeSets = array();
-												foreach($rangeSets as $rangeSet) {
-													$range = explode('!', $rangeSet);	// FIXME: what if sheetname contains exclamation mark?
-													$rangeSet = isset($range[1]) ? $range[1] : $range[0];
-													$newRangeSets[] = str_replace('$', '', $rangeSet);
-												}
-												$docSheet->getPageSetup()->setPrintArea(implode(',',$newRangeSets));
+												$docSheet->getPageSetup()->setPrintArea(implode(',', $extractedRange));
 												break;
 
 											default:
@@ -1695,7 +1683,15 @@ class PHPExcel_Reader_Excel2007 extends PHPExcel_Reader_Abstract implements PHPE
 		return $excel;
 	}
 
-
+	private static function _extractRange($pRange) {
+		$extractedRange = PHPExcel_Worksheet::extractSheetTitleList($pRange);
+		foreach ($extractedRange as &$range) {
+			$range = str_replace('$', '', $range);
+		}
+		unset($range);
+		return $extractedRange;
+	}
+	
 	private static function _readColor($color, $background=FALSE) {
 		if (isset($color["rgb"])) {
 			return (string)$color["rgb"];

@@ -2568,17 +2568,72 @@ class PHPExcel_Worksheet implements PHPExcel_IComparable
 	 */
 	public static function extractSheetTitle($pRange, $returnRange = false) {
 		// Sheet title included?
-		if (($sep = strpos($pRange, '!')) === false) {
+		if (strpos($pRange, '!') === false) {
 			return '';
 		}
+		
+		$sep = 0;
+		$sheetName = self::_parseSheetName($pRange, $sep);
+		$range = substr($pRange, $sep);
 
 		if ($returnRange) {
-			return array( trim(substr($pRange, 0, $sep),"'"),
-						  substr($pRange, $sep + 1)
-						);
+			return array($sheetName, $range);
 		}
 
-		return substr($pRange, $sep + 1);
+		return $range;
+	}
+
+	/**
+	 * @return Array array of array that contains sheetName and range or of range
+	 */
+	public static function extractSheetTitleList($pRange, $returnRange = false) {
+		$ranges = array();
+		$i = 0;
+		while ($i < strlen($pRange)) {
+			$sheetName = self::_parseSheetName($pRange, $i);
+			$range = self::_parseCoordinateRange($pRange, $i);
+			$ranges[] = ($returnRange? array($sheetName, $range) : $range);
+		}
+		return $ranges;
+	}
+	
+	private static function _parseSheetName($str, &$i) {
+		$quoted = ($str[$i] === "'");
+		if (!$quoted) {
+			$endPos = strpos($str, "!", $i);
+			if ($endPos === FALSE) throw new Exception("\"!\" is required");
+			$sheetName = substr($str, $i, $endPos - $i);
+			$i = $endPos + 1;
+			return $sheetName;
+		} else {
+			$sheetNameFragments = array();
+			++$i;
+			while ($i < strlen($str)) {
+				$secondPos = strpos($str, "'", $i);
+				if ($secondPos === FALSE) throw new Exception("\"'\" is required");
+				
+				$afterChar = $str[$secondPos + 1];
+				$sheetNameFragments[] = substr($str, $i, $secondPos - $i);
+				$i = $secondPos + 2;
+				if ($afterChar === "'") { // quotation itself is repeated twice like: ''.
+					$sheetNameFragments[] = "'";
+					continue;
+				} else {
+					if ($afterChar !== "!") throw new Exception("Either \"!\" or \"'\" is required after \"!\"");
+					break;
+				}
+			}
+			
+			return implode('', $sheetNameFragments);
+		}
+	}
+
+	private static function _parseCoordinateRange($str, &$i) {
+		$endPos = strpos($str, ",", $i);
+		if ($endPos === FALSE) $endPos = strlen($str);
+		$sheetName = substr($str, $i, $endPos - $i);
+		$i = $endPos + 1;
+		return $sheetName;
 	}
 
 	/**

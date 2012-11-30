@@ -956,11 +956,11 @@ class PHPExcel_Reader_Excel5 extends PHPExcel_Reader_Abstract implements PHPExce
 				case pack('C', 0x06):
 					// print area
 					//	in general, formula looks like this: Foo!$C$7:$J$66,Bar!$A$1:$IV$2
-					$ranges = self::_parseRangeList($definedName['formula']);
+					$ranges = PHPExcel_Worksheet::extractSheetTitleList($definedName['formula'], true);
 					$extractedRanges = array();
 					foreach ($ranges as $range) {
-						$sheetName = $range['sheetName'];
-						$extractRange = str_replace('$', '', $range['range']);
+						$sheetName = $range[0];
+						$extractRange = str_replace('$', '', $range[1]);
 						if (strpos($extractRange, ':') === FALSE) { // range form from single cell
 							$extractRange = $extractRange.':'.$extractRange;
 						}
@@ -986,10 +986,10 @@ class PHPExcel_Reader_Excel5 extends PHPExcel_Reader_Abstract implements PHPExce
 					//  Note that sheetname may be quoted like this: 'Foo!Bar'!$A1$1:$J$66;
 					//      then special characters are allowed.
 					//  And quoted sheetname may include quotation itself like this: 'Foo''Bar'!$A1$1:$J$66
-					$ranges = self::_parseRangeList($definedName['formula']);
+					$ranges = PHPExcel_Worksheet::extractSheetTitleList($definedName['formula'], true);
 					foreach ($ranges as $range) {
-						if ($docSheet = $this->_phpExcel->getSheetByName($range['sheetName'])) {
-							$extractedRange = str_replace('$', '', $range['range']);
+						if ($docSheet = $this->_phpExcel->getSheetByName($range[0])) {
+							$extractedRange = str_replace('$', '', $range[1]);
 
 							$coordinateStrings = explode(':', $extractedRange);
 							if (count($coordinateStrings) == 2) {
@@ -1010,14 +1010,11 @@ class PHPExcel_Reader_Excel5 extends PHPExcel_Reader_Abstract implements PHPExce
 
 				}
 			} else {
-				// Extract range
-				$explodes = explode('!', $definedName['formula']);
-
-				if (count($explodes) == 2) {
-					if (($docSheet = $this->_phpExcel->getSheetByName($explodes[0])) ||
-						($docSheet = $this->_phpExcel->getSheetByName(trim($explodes[0],"'")))) {
-						$extractedRange = $explodes[1];
-						$extractedRange = str_replace('$', '', $extractedRange);
+				if (strpos($definedName['formula'], '!') !== false) {
+					// Extract range
+					list($sheetName, $range) = PHPExcel_Worksheet::extractSheetTitle($definedName['formula'], true);
+					if ($docSheet = $this->_phpExcel->getSheetByName($sheetName)) {
+						$extractedRange = str_replace('$', '', $range);
 
 						$localOnly = ($definedName['scope'] == 0) ? false : true;
 
@@ -1034,59 +1031,6 @@ class PHPExcel_Reader_Excel5 extends PHPExcel_Reader_Abstract implements PHPExce
 		}
 
 		return $this->_phpExcel;
-	}
-
-	/**
-	 * @return Array array of associated array with keys 'sheetname', 'range'
-	 */
-	private static function _parseRangeList($str) {
-		$ranges = array();
-		$i = 0;
-		while ($i < strlen($str)) {
-			$sheetName = self::_parseSheetName($str, $i);
-			$range = self::_parseCoordinateRange($str, $i);
-			$ranges[] = array('sheetName'=>$sheetName, 'range'=>$range);
-		}
-		return $ranges;
-	}
-	
-	private static function _parseSheetName($str, &$i) {
-		$quoted = ($str[$i] === "'");
-		if (!$quoted) {
-			$endPos = strpos($str, "!", $i);
-			if ($endPos === FALSE) throw new Exception("\"!\" is required");
-			$sheetName = substr($str, $i, $endPos - $i);
-			$i = $endPos + 1;
-			return $sheetName;
-		} else {
-			$sheetNameFragments = array();
-			++$i;
-			while ($i < strlen($str)) {
-				$secondPos = strpos($str, "'", $i);
-				if ($secondPos === FALSE) throw new Exception("\"'\" is required");
-				
-				$afterChar = $str[$secondPos + 1];
-				$sheetNameFragments[] = substr($str, $i, $secondPos - $i);
-				$i = $secondPos + 2;
-				if ($afterChar === "'") { // quotation itself is repeated twice like: ''.
-					$sheetNameFragments[] = "'";
-					continue;
-				} else {
-					if ($afterChar !== "!") throw new Exception("Either \"!\" or \"'\" is required after \"!\"");
-					break;
-				}
-			}
-			
-			return implode('', $sheetNameFragments);
-		}
-	}
-
-	private static function _parseCoordinateRange($str, &$i) {
-		$endPos = strpos($str, ",", $i);
-		if ($endPos === FALSE) $endPos = strlen($str);
-		$sheetname = substr($str, $i, $endPos - $i);
-		$i = $endPos + 1;
-		return $sheetname;
 	}
 	
 	/**
