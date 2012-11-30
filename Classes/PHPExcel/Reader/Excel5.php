@@ -956,21 +956,11 @@ class PHPExcel_Reader_Excel5 extends PHPExcel_Reader_Abstract implements PHPExce
 				case pack('C', 0x06):
 					// print area
 					//	in general, formula looks like this: Foo!$C$7:$J$66,Bar!$A$1:$IV$2
-
-					$ranges = explode(',', $definedName['formula']); // FIXME: what if sheetname contains comma?
-
+					$ranges = self::_parseRangeList($definedName['formula']);
 					$extractedRanges = array();
 					foreach ($ranges as $range) {
-						// $range should look like one of these
-						//		Foo!$C$7:$J$66
-						//		Bar!$A$1:$IV$2
-
-						$explodes = explode('!', $range);	// FIXME: what if sheetname contains exclamation mark?
-						$sheetName = $explodes[0];
-
-						if (count($explodes) == 2) {
-							$extractedRanges[] = str_replace('$', '', $explodes[1]); // C7:J66
-						}
+						$sheetName = $range['sheetName'];
+						$extractedRanges[] = str_replace('$', '', $range['range']); // C7:J66
 					}
 					if ($docSheet = $this->_phpExcel->getSheetByName($sheetName)) {
 						$docSheet->getPageSetup()->setPrintArea(implode(',', $extractedRanges)); // C7:J66,A1:IV2
@@ -988,34 +978,26 @@ class PHPExcel_Reader_Excel5 extends PHPExcel_Reader_Abstract implements PHPExce
 					//		columns A-B repeat
 					// 3. both repeating rows and repeating columns
 					//		formula looks like this: Sheet!$A$1:$B$65536,Sheet!$A$1:$IV$2
-
-					$ranges = explode(',', $definedName['formula']); // FIXME: what if sheetname contains comma?
-
+					//
+					//  Note that sheetname may be quoted like this: 'Foo!Bar'!$A1$1:$J$66;
+					//      then special characters are allowed.
+					//  And quoted sheetname may include quotation itself like this: 'Foo''Bar'!$A1$1:$J$66
+					$ranges = self::_parseRangeList($definedName['formula']);
 					foreach ($ranges as $range) {
-						// $range should look like this one of these
-						//		Sheet!$A$1:$B$65536
-						//		Sheet!$A$1:$IV$2
+						if ($docSheet = $this->_phpExcel->getSheetByName($range['sheetName'])) {
+							$extractedRange = str_replace('$', '', $range['range']);
 
-						$explodes = explode('!', $range);
+							$coordinateStrings = explode(':', $extractedRange);
+							if (count($coordinateStrings) == 2) {
+								list($firstColumn, $firstRow) = PHPExcel_Cell::coordinateFromString($coordinateStrings[0]);
+								list($lastColumn, $lastRow) = PHPExcel_Cell::coordinateFromString($coordinateStrings[1]);
 
-						if (count($explodes) == 2) {
-							if ($docSheet = $this->_phpExcel->getSheetByName($explodes[0])) {
-
-								$extractedRange = $explodes[1];
-								$extractedRange = str_replace('$', '', $extractedRange);
-
-								$coordinateStrings = explode(':', $extractedRange);
-								if (count($coordinateStrings) == 2) {
-									list($firstColumn, $firstRow) = PHPExcel_Cell::coordinateFromString($coordinateStrings[0]);
-									list($lastColumn, $lastRow) = PHPExcel_Cell::coordinateFromString($coordinateStrings[1]);
-
-									if ($firstColumn == 'A' and $lastColumn == 'IV') {
-										// then we have repeating rows
-										$docSheet->getPageSetup()->setRowsToRepeatAtTop(array($firstRow, $lastRow));
-									} elseif ($firstRow == 1 and $lastRow == 65536) {
-										// then we have repeating columns
-										$docSheet->getPageSetup()->setColumnsToRepeatAtLeft(array($firstColumn, $lastColumn));
-									}
+								if ($firstColumn == 'A' and $lastColumn == 'IV') {
+									// then we have repeating rows
+									$docSheet->getPageSetup()->setRowsToRepeatAtTop(array($firstRow, $lastRow));
+								} elseif ($firstRow == 1 and $lastRow == 65536) {
+									// then we have repeating columns
+									$docSheet->getPageSetup()->setColumnsToRepeatAtLeft(array($firstColumn, $lastColumn));
 								}
 							}
 						}
@@ -1050,7 +1032,59 @@ class PHPExcel_Reader_Excel5 extends PHPExcel_Reader_Abstract implements PHPExce
 		return $this->_phpExcel;
 	}
 
+	/**
+	 * @return Array array of associated array with keys 'sheetname', 'range'
+	 */
+	private static function _parseRangeList($str) {
+		$ranges = array();
+		$i = 0;
+		while ($i < strlen($str)) {
+			$sheetName = self::_parseSheetName($str, $i);
+			$range = self::_parseCoordinateRange($str, $i);
+			$ranges[] = array('sheetName'=>$sheetName, 'range'=>$range);
+		}
+		return $ranges;
+	}
+	
+	private static function _parseSheetName($str, &$i) {
+		$quoted = ($str[$i] === "'");
+		if (!$quoted) {
+			$endPos = strpos($str, "!", $i);
+			if ($endPos === FALSE) throw new Exception("\"!\" is required");
+			$sheetName = substr($str, $i, $endPos - $i);
+			$i = $endPos + 1;
+			return $sheetName;
+		} else {
+			$sheetNameFragments = array();
+			++$i;
+			while ($i < strlen($str)) {
+				$secondPos = strpos($str, "'", $i);
+				if ($secondPos === FALSE) throw new Exception("\"'\" is required");
+				
+				$afterChar = $str[$secondPos + 1];
+				$sheetNameFragments[] = substr($str, $i, $secondPos - $i);
+				$i = $secondPos + 2;
+				if ($afterChar === "'") { // quotation itself is repeated twice like: ''.
+					$sheetNameFragments[] = "'";
+					continue;
+				} else {
+					if ($afterChar !== "!") throw new Exception("Either \"!\" or \"'\" is required after \"!\"");
+					break;
+				}
+			}
+			
+			return implode('', $sheetNameFragments);
+		}
+	}
 
+	private static function _parseCoordinateRange($str, &$i) {
+		$endPos = strpos($str, ",", $i);
+		if ($endPos === FALSE) $endPos = strlen($str);
+		$sheetname = substr($str, $i, $endPos - $i);
+		$i = $endPos + 1;
+		return $sheetname;
+	}
+	
 	/**
 	 * Use OLE reader to extract the relevant data streams from the OLE file
 	 *
